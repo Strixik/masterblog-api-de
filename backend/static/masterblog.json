@@ -1,0 +1,141 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Masterblog API",
+    "version": "1.0.0"
+  },
+  "schemes": ["http"],
+  "host": "localhost:5002",
+  "basePath": "/",
+  "produces": ["application/json"],
+  "tags": [
+    {
+      "name": "Posts",
+      "description": "Beiträge verwalten"
+    }
+  ],
+  "paths": {
+    "/api/posts": {
+      "get": {
+        "tags": ["Posts"],
+        "summary": "Alle Beiträge abrufen",
+        "parameters": [
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string",
+            "enum": ["title", "content"],
+            "description": "Optionales Sortierfeld"
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "type": "string",
+            "enum": ["asc", "desc"],
+            "default": "asc",
+            "description": "Sortierrichtung"
+          }
+        ],
+        "responses": {
+          "200": {"description": "Liste der Beiträge"},
+          "400": {"description": "Ungültige Sortierparameter"}
+        }
+      },
+      "post": {
+        "tags": ["Posts"],
+        "summary": "Beitrag erstellen",
+        "consumes": ["application/json"],
+        "parameters": [
+          {
+            "name": "post",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "required": ["title", "content"],
+              "properties": {
+                "title": {"type": "string"},
+                "content": {"type": "string"}
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {"description": "Beitrag erstellt"},
+          "400": {"description": "Ungültige Eingabe oder fehlende Felder"}
+        }
+      }
+    },
+    "/api/posts/search": {
+      "get": {
+        "tags": ["Posts"],
+        "summary": "Beiträge nach Titel oder Inhalt suchen",
+        "parameters": [
+          {
+            "name": "title",
+            "in": "query",
+            "type": "string",
+            "description": "Suchbegriff für den Titel"
+          },
+          {
+            "name": "content",
+            "in": "query",
+            "type": "string",
+            "description": "Suchbegriff für den Inhalt"
+          }
+        ],
+        "responses": {
+          "200": {"description": "Liste passender Beiträge"}
+        }
+      }
+    },
+    "/api/posts/{post_id}": {
+      "put": {
+        "tags": ["Posts"],
+        "summary": "Beitrag aktualisieren",
+        "consumes": ["application/json"],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "type": "integer"
+          },
+          {
+            "name": "post",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "title": {"type": "string"},
+                "content": {"type": "string"}
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {"description": "Aktualisierter Beitrag"},
+          "400": {"description": "Ungültige JSON-Eingabe"},
+          "404": {"description": "Beitrag nicht gefunden"}
+        }
+      },
+      "delete": {
+        "tags": ["Posts"],
+        "summary": "Beitrag löschen",
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "type": "integer"
+          }
+        ],
+        "responses": {
+          "200": {"description": "Beitrag gelöscht"},
+          "404": {"description": "Beitrag nicht gefunden"}
+        }
+      }
+    }
+  }
+}
