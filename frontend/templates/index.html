@@ -1,29 +1,140 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blog Posts</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="static/styles.css">
+    <title>Masterblog</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script defer src="{{ url_for('static', filename='main.js') }}"></script>
 </head>
-<body>
-    <div class="container">
-        <h1>📚 Blog Posts</h1>
-        <div class="input-field">
-            <input type="text" id="api-base-url" placeholder="Enter API Base URL" value="http://127.0.0.1:5002/api">
-            <button onclick="loadPosts()">Load Posts</button>
-        </div>
-        <div class="input-field">
-            <input type="text" id="post-title" placeholder="Enter Post Title">
-            <input type="text" id="post-content" placeholder="Enter Post Content">
-            <button onclick="addPost()">Add Post</button>
-        </div>
-        <div id="post-container">
-            <!-- Blog posts will be inserted here by JavaScript -->
-        </div>
-    </div>
+<dialog id="delete-dialog" class="confirm-dialog">
+    <h2>Beitrag löschen?</h2>
+    <p>Dieser Beitrag wird dauerhaft gelöscht.</p>
 
-    <script src="static/main.js"></script>
+    <div class="dialog-actions">
+        <button id="cancel-delete-button" class="button secondary" type="button">
+            Abbrechen
+        </button>
+        <button id="confirm-delete-button" class="button danger" type="button">
+            Löschen
+        </button>
+    </div>
+</dialog>
+<body>
+    <main class="container">
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">MASTERBLOG</p>
+                <h1>Deine Beiträge</h1>
+                <p class="subtitle">
+                    Beiträge schreiben, durchsuchen und verwalten.
+                </p>
+            </div>
+            <span id="post-count" class="count">0 Beiträge</span>
+        </header>
+
+        <section class="panel" aria-labelledby="connection-heading">
+            <h2 id="connection-heading">API-Verbindung</h2>
+            <div class="connection-row">
+                <label class="field grow">
+                    <span>API Base URL</span>
+                    <input
+                        id="api-base-url"
+                        type="url"
+                        value="http://127.0.0.1:5002/api"
+                        placeholder="http://127.0.0.1:5002/api"
+                    >
+                </label>
+                <button id="load-button" class="button secondary" type="button">
+                    Beiträge laden
+                </button>
+            </div>
+        </section>
+
+        <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+
+        <section class="panel" aria-labelledby="editor-heading">
+            <div class="section-heading">
+                <h2 id="editor-heading">Neuen Beitrag schreiben</h2>
+                <button id="cancel-edit-button" class="text-button" type="button" hidden>
+                    Bearbeitung abbrechen
+                </button>
+            </div>
+
+            <form id="post-form">
+                <div class="form-grid">
+                    <label class="field">
+                        <span>Titel <span aria-hidden="true">*</span></span>
+                        <input id="post-title" name="title" type="text" required>
+                    </label>
+                    <label class="field">
+                        <span>Autor</span>
+                        <input id="post-author" name="author" type="text"
+                               placeholder="Unbekannt">
+                    </label>
+                </div>
+
+                <label class="field">
+                    <span>Inhalt <span aria-hidden="true">*</span></span>
+                    <textarea id="post-content" name="content" rows="5" required></textarea>
+                </label>
+
+                <div class="form-actions">
+                    <label class="field date-field">
+                        <span>Datum</span>
+                        <input id="post-date" name="date" type="date">
+                    </label>
+                    <button id="submit-button" class="button primary" type="submit">
+                        Beitrag erstellen
+                    </button>
+                </div>
+            </form>
+        </section>
+
+        <section class="panel" aria-labelledby="posts-heading">
+            <div class="section-heading">
+                <div>
+                    <h2 id="posts-heading">Beiträge</h2>
+                    <p class="section-description">
+                        Suche in Titel, Inhalt, Autor und Datum.
+                    </p>
+                </div>
+            </div>
+
+            <form id="filter-form" class="filters">
+                <label class="field grow">
+                    <span>Suche</span>
+                    <input id="search-input" type="search"
+                           placeholder="Suchbegriff eingeben">
+                </label>
+                <label class="field">
+                    <span>Sortieren nach</span>
+                    <select id="sort-field">
+                        <option value="">Originalreihenfolge</option>
+                        <option value="title">Titel</option>
+                        <option value="content">Inhalt</option>
+                        <option value="author">Autor</option>
+                        <option value="date">Datum</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Richtung</span>
+                    <select id="sort-direction">
+                        <option value="asc">Aufsteigend</option>
+                        <option value="desc">Absteigend</option>
+                    </select>
+                </label>
+                <button class="button secondary" type="submit">Anwenden</button>
+                <button id="reset-filter-button" class="text-button" type="button">
+                    Zurücksetzen
+                </button>
+            </form>
+
+            <div id="post-container" class="post-list" aria-live="polite"></div>
+            <p id="empty-state" class="empty-state" hidden>
+                Keine Beiträge gefunden.
+            </p>
+        </section>
+    </main>
 </body>
 </html>
