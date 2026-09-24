@@ -39,15 +39,51 @@ swagger_ui_blueprint = get_swaggerui_blueprint(
     API_URL,
     config={"app_name": "Masterblog API"},
 )
-app.register_blueprint(swagger_ui_blueprint, url_prefix=SWAGGER_URL)
+
+app.register_blueprint(
+    swagger_ui_blueprint,
+    url_prefix=SWAGGER_URL,
+)
 
 
 class StorageError(Exception):
     """Fehler beim Lesen oder Schreiben der Beitragsdatei."""
 
 
+def valid_date(value):
+    """Prüft ein Datum im Format YYYY-MM-DD."""
+    if not isinstance(value, str):
+        return False
+
+    try:
+        parsed_date = date.fromisoformat(value)
+        return parsed_date.isoformat() == value
+    except ValueError:
+        return False
+
+
+def validate_text_fields(data, fields):
+    """Prüft Textfelder und entfernt äußere Leerzeichen."""
+    cleaned_fields = {}
+
+    for field in fields:
+        if field not in data:
+            continue
+
+        value = data[field]
+
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                f"{field} muss Text sein und darf nicht leer sein."
+            )
+
+        cleaned_fields[field] = value.strip()
+
+    return cleaned_fields
+
+
 def save_posts(posts):
-    """Speichert Beiträge über eine temporäre Datei."""
+    """Speichert Beiträge atomar über eine temporäre Datei."""
     temporary_path = None
 
     try:
@@ -60,14 +96,27 @@ def save_posts(posts):
             delete=False,
         ) as temporary_file:
             temporary_path = Path(temporary_file.name)
-            json.dump(posts, temporary_file, ensure_ascii=False, indent=2)
+
+            json.dump(
+                posts,
+                temporary_file,
+                ensure_ascii=False,
+                indent=2,
+            )
             temporary_file.write("\n")
 
         os.replace(temporary_path, POSTS_FILE)
+
     except OSError as error:
         if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
-        raise StorageError("Beiträge konnten nicht gespeichert werden.") from error
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        raise StorageError(
+            "Beiträge konnten nicht gespeichert werden."
+        ) from error
 
 
 def load_posts():
@@ -75,130 +124,181 @@ def load_posts():
     try:
         with POSTS_FILE.open(encoding="utf-8") as file:
             posts = json.load(file)
+
     except FileNotFoundError:
-        # Die Datei beim ersten Start mit Beispielbeiträgen anlegen.
-        posts = INITIAL_POSTS
+        # Beim ersten Start eine neue Datei mit Beispieldaten anlegen.
+        posts = [post.copy() for post in INITIAL_POSTS]
         save_posts(posts)
         return posts
+
     except (OSError, json.JSONDecodeError) as error:
-        raise StorageError("Beitragsdatei konnte nicht gelesen werden.") from error
+        raise StorageError(
+            "Beitragsdatei konnte nicht gelesen werden."
+        ) from error
 
-    if not isinstance(posts, list) or any(
-        not isinstance(post, dict)
-        or type(post.get("id")) is not int
-        or any(
-            not isinstance(post.get(field), str)
-            for field in ("title", "content", "author", "date")
+    if not isinstance(posts, list):
+        raise StorageError(
+            "Beitragsdatei muss eine Liste enthalten."
         )
-        or not valid_date(post["date"])
-        for post in posts
-    ):
-        raise StorageError("Beitragsdatei enthält ungültige Daten.")
 
-    if len({post["id"] for post in posts}) != len(posts):
-        raise StorageError("Beitragsdatei enthält doppelte IDs.")
+    for post in posts:
+        if not isinstance(post, dict):
+            raise StorageError(
+                "Beitragsdatei enthält einen ungültigen Beitrag."
+            )
+
+        if type(post.get("id")) is not int:
+            raise StorageError(
+                "Jeder Beitrag muss eine ganzzahlige ID enthalten."
+            )
+
+        for field in ("title", "content", "author", "date"):
+            if not isinstance(post.get(field), str):
+                raise StorageError(
+                    f"Das Feld {field} muss Text enthalten."
+                )
+
+        if not valid_date(post["date"]):
+            raise StorageError(
+                "Beitragsdatei enthält ein ungültiges Datum."
+            )
+
+    post_ids = [post["id"] for post in posts]
+
+    if len(set(post_ids)) != len(post_ids):
+        raise StorageError(
+            "Beitragsdatei enthält doppelte IDs."
+        )
 
     return posts
 
 
-def valid_date(value):
-    """Prüft ein Datum im Format YYYY-MM-DD."""
-    if not isinstance(value, str):
-        return False
-
-    try:
-        return date.fromisoformat(value).isoformat() == value
-    except ValueError:
-        return False
-
-
 @app.errorhandler(StorageError)
 def storage_error(error):
-    """Gibt Speicherfehler als JSON zurück."""
+    """Gibt Speicherfehler als JSON-Antwort zurück."""
     app.logger.error("%s", error)
-    return jsonify({"error": str(error)}), 500
+
+    return jsonify({
+        "error": str(error),
+    }), 500
 
 
 @app.route("/api/posts", methods=["GET"])
 def get_posts():
     """Gibt Beiträge optional sortiert zurück."""
     posts = load_posts()
+
     sort_field = request.args.get("sort")
     direction = request.args.get("direction", "asc")
 
-    if sort_field is not None and sort_field not in (
-        "title", "content", "author", "date"
+    allowed_sort_fields = (
+        "title",
+        "content",
+        "author",
+        "date",
+    )
+
+    if (
+        sort_field is not None
+        and sort_field not in allowed_sort_fields
     ):
         return jsonify({
-            "error": "Ungültiges Sortierfeld."
+            "error": (
+                "Ungültiges Sortierfeld. Erlaubt sind "
+                "title, content, author und date."
+            )
         }), 400
 
     if direction not in ("asc", "desc"):
         return jsonify({
-            "error": "Ungültige Sortierrichtung. Erlaubt sind asc und desc."
+            "error": (
+                "Ungültige Sortierrichtung. "
+                "Erlaubt sind asc und desc."
+            )
         }), 400
 
     if sort_field is None:
         return jsonify(posts)
 
-    if sort_field == "date":
-        sort_key = lambda post: date.fromisoformat(post["date"])
-    else:
-        sort_key = lambda post: post[sort_field].lower()
+    def sort_key(post):
+        """Erzeugt den Sortierschlüssel für einen Beitrag."""
+        if sort_field == "date":
+            return date.fromisoformat(post["date"])
 
-    return jsonify(sorted(
+        return post[sort_field].lower()
+
+    sorted_posts = sorted(
         posts,
         key=sort_key,
         reverse=(direction == "desc"),
-    ))
+    )
+
+    return jsonify(sorted_posts)
 
 
 @app.route("/api/posts", methods=["POST"])
 def add_post():
-    """Erstellt und speichert einen Beitrag."""
+    """Erstellt und speichert einen neuen Beitrag."""
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
-        return jsonify({"error": "Ein JSON-Objekt wird erwartet."}), 400
+        return jsonify({
+            "error": "Ein JSON-Objekt wird erwartet."
+        }), 400
+
+    required_fields = ("title", "content")
 
     missing_fields = [
-        field for field in ("title", "content") if field not in data
+        field
+        for field in required_fields
+        if field not in data
     ]
+
     if missing_fields:
         return jsonify({
             "error": "Pflichtfelder fehlen.",
             "fields": missing_fields,
         }), 400
 
-    if not all(
-        isinstance(data[field], str) and data[field].strip()
-        for field in ("title", "content")
-    ):
+    try:
+        cleaned_fields = validate_text_fields(
+            data,
+            ("title", "content", "author"),
+        )
+    except ValueError as error:
         return jsonify({
-            "error": "Titel und Inhalt müssen nicht leerer Text sein."
+            "error": str(error),
         }), 400
 
-    author = data.get("author", "Unbekannt")
-    if not isinstance(author, str):
-        return jsonify({"error": "Autor muss Text sein."}), 400
+    post_date = data.get(
+        "date",
+        date.today().isoformat(),
+    )
 
-    post_date = data.get("date", date.today().isoformat())
     if not valid_date(post_date):
         return jsonify({
             "error": "Datum muss im Format YYYY-MM-DD sein."
         }), 400
 
     posts = load_posts()
+
     new_post = {
-        "id": max((post["id"] for post in posts), default=0) + 1,
-        "title": data["title"],
-        "content": data["content"],
-        "author": author,
+        "id": max(
+            (post["id"] for post in posts),
+            default=0,
+        ) + 1,
+        "title": cleaned_fields["title"],
+        "content": cleaned_fields["content"],
+        "author": cleaned_fields.get(
+            "author",
+            "Unbekannt",
+        ),
         "date": post_date,
     }
 
     posts.append(new_post)
     save_posts(posts)
+
     return jsonify(new_post), 201
 
 
@@ -206,32 +306,45 @@ def add_post():
 def search_posts():
     """Sucht Beiträge in Titel, Inhalt, Autor und Datum."""
     posts = load_posts()
+
     search_query = request.args.get("search")
     title_query = request.args.get("title")
     content_query = request.args.get("content")
 
-    if all(
-        query is None
-        for query in (search_query, title_query, content_query)
-    ):
+    queries = (
+        search_query,
+        title_query,
+        content_query,
+    )
+
+    if all(query is None for query in queries):
         return jsonify(posts)
 
     matches = [
-        post for post in posts
+        post
+        for post in posts
         if (
             search_query is not None
             and any(
                 search_query.lower() in post[field].lower()
-                for field in ("title", "content", "author", "date")
+                for field in (
+                    "title",
+                    "content",
+                    "author",
+                    "date",
+                )
             )
-        ) or (
+        )
+        or (
             title_query is not None
             and title_query.lower() in post["title"].lower()
-        ) or (
+        )
+        or (
             content_query is not None
             and content_query.lower() in post["content"].lower()
         )
     ]
+
     return jsonify(matches)
 
 
@@ -239,21 +352,32 @@ def search_posts():
 def delete_post(post_id):
     """Löscht einen Beitrag und speichert die Änderung."""
     posts = load_posts()
+
     post = next(
-        (item for item in posts if item["id"] == post_id),
+        (
+            item
+            for item in posts
+            if item["id"] == post_id
+        ),
         None,
     )
 
     if post is None:
         return jsonify({
-            "error": f"Beitrag mit der ID {post_id} wurde nicht gefunden."
+            "error": (
+                f"Beitrag mit der ID {post_id} "
+                "wurde nicht gefunden."
+            )
         }), 404
 
     posts.remove(post)
     save_posts(posts)
 
     return jsonify({
-        "message": f"Post with id {post_id} has been deleted successfully."
+        "message": (
+            f"Post with id {post_id} "
+            "has been deleted successfully."
+        )
     }), 200
 
 
@@ -261,38 +385,59 @@ def delete_post(post_id):
 def update_post(post_id):
     """Aktualisiert einen Beitrag und speichert die Änderung."""
     posts = load_posts()
+
     post = next(
-        (item for item in posts if item["id"] == post_id),
+        (
+            item
+            for item in posts
+            if item["id"] == post_id
+        ),
         None,
     )
 
     if post is None:
         return jsonify({
-            "error": f"Beitrag mit der ID {post_id} wurde nicht gefunden."
+            "error": (
+                f"Beitrag mit der ID {post_id} "
+                "wurde nicht gefunden."
+            )
         }), 404
 
     data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Ein JSON-Objekt wird erwartet."}), 400
 
-    for field in ("title", "content", "author"):
-        if field in data and not isinstance(data[field], str):
-            return jsonify({
-                "error": f"{field} muss Text sein."
-            }), 400
+    if not isinstance(data, dict):
+        return jsonify({
+            "error": "Ein JSON-Objekt wird erwartet."
+        }), 400
+
+    try:
+        cleaned_fields = validate_text_fields(
+            data,
+            ("title", "content", "author"),
+        )
+    except ValueError as error:
+        return jsonify({
+            "error": str(error),
+        }), 400
 
     if "date" in data and not valid_date(data["date"]):
         return jsonify({
             "error": "Datum muss im Format YYYY-MM-DD sein."
         }), 400
 
-    for field in ("title", "content", "author", "date"):
-        if field in data:
-            post[field] = data[field]
+    post.update(cleaned_fields)
+
+    if "date" in data:
+        post["date"] = data["date"]
 
     save_posts(posts)
+
     return jsonify(post), 200
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5002, debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=5002,
+        debug=True,
+    )
